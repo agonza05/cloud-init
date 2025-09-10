@@ -1,0 +1,10 @@
+#cloud-config
+
+users:
+  - name: agonza
+    lock_passwd: True
+    gecos: Alberto Gonzalez
+    groups: [adm, cdrom, dip, lxd, sudo]
+    ssh_import_id: [gh:agonza05]
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    shell: /bin/bash
