@@ -1,0 +1,173 @@
+#cloud-config
+
+timezone: Etc/UTC
+
+package_update: true
+package_upgrade: true
+
+groups: [docker]
+
+users:
+  - name: agonza
+    lock_passwd: True
+    gecos: Alberto Gonzalez
+    primary_group: agonza
+    groups: [agonza, sudo, docker]
+    ssh_import_id: [gh:agonza05]
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    shell: /bin/bash
+
+packages:
+  - ca-certificates
+  - openssh-server
+  - nano
+  - curl
+  - iputils-ping
+
+# SSH and password
+allow_public_ssh_keys: true
+disable_root: true
+ssh_quiet_keygen: true
+ssh_deletekeys: true
+ssh_pwauth: false
+ssh_publish_hostkeys:
+  blacklist: [rsa]
+  enabled: true
+
+# NTP Config
+ntp:
+  enabled: true
+  ntp_client: chrony
+  servers: [time.cloudflare.com]
+
+# Commands executed on first boot
+runcmd:
+  # Disable swap
+  - sysctl -w vm.swappiness=0
+  - echo "vm.swappiness = 0" | tee -a /etc/sysctl.conf
+  - swapoff -a
+
+  # Disable unnecessary services
+  - systemctl disable man-db.timer man-db.service --now
+  - systemctl disable apport.service apport-autoreport.service  --now
+  # - systemctl disable apt-daily.service apt-daily.timer --now
+  # - systemctl disable apt-daily-upgrade.service apt-daily-upgrade.timer --now
+  # - systemctl disable unattended-upgrades.service --now
+  - systemctl disable motd-news.service motd-news.timer --now
+  - systemctl disable bluetooth.target --now
+  - systemctl disable ua-messaging.service ua-messaging.timer --now
+  - systemctl disable ua-timer.timer ua-timer.service --now
+  - systemctl disable systemd-tmpfiles-clean.timer --now
+  - systemctl disable cloud-init --now
+
+  # Enable ssh service
+  - systemctl enable --now ssh
+
+  # Disable MOTD sections
+  - chmod -R -x /etc/update-motd.d
+
+  # Keep local config files during upgrades
+  - sed -i "/^conf_force_conffnew=YES$/d" /etc/ucf.conf
+
+  # Set architecture and os version code
+  - export DPKG_ARCH=$(dpkg --print-architecture)
+  - export OS_CODENAME=$(source /etc/os-release && echo $VERSION_CODENAME)
+
+  # Install tailscale
+  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/${OS_CODENAME}.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/${OS_CODENAME}.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list
+  - apt-get update
+  - apt-get install -y tailscale
+  - tailscale up --auth-key tskey-abcdef1432341818
+  - tailscale set --ssh
+
+  # Install docker
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=${DPKG_ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${OS_CODENAME} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable docker
+  - systemctl start docker
+
+# Config files
+write_files:
+  # Force new package config files
+  - path: /etc/ucf.conf
+    append: true
+    content: |
+
+      conf_force_conffnew=YES
+
+  # SSH banner
+  - path: /etc/ssh/sshbanner
+    content: |
+
+      * * * * * * * * W A R N I N G * * * * * * * * *
+      UNAUTHORIZED ACCESS TO THIS DEVICE IS PROHIBITED
+
+      This system is for authorized use only. You must have explicit, authorized permission to access or configure this device.
+      By using this system, all users acknowledge notice of, and agree to comply with, the Acceptable Use Policy (“AUP”).
+      Unauthorized attempts and actions to access or improper use this system may result in administrative disciplinary action, civil charges/criminal penalties, and/or other sanctions.
+      All activities performed on this device are logged and monitored.
+      By continuing to use this system you indicate your awareness of and consent to these terms and conditions of use.
+
+      LOG OFF IMMEDIATELY if you do not agree to the conditions stated in this warning.
+      * * * * * * * * * * * * * * * * * * * * * * * *
+
+  # SSH config
+  - path: /etc/ssh/sshd_config.d/40-ssh.conf
+    content: |
+      # AAI ssh login banner
+      Banner /etc/ssh/sshbanner
+
+      # Disable password authentication
+      PasswordAuthentication no
+      PermitEmptyPasswords no
+
+      # Disable other authentication methods
+      ChallengeResponseAuthentication no
+      KerberosAuthentication no
+      GSSAPIAuthentication no
+
+      # Disable video forwarding
+      X11Forwarding no
+
+      # Disable clients to pass custom environment variables
+      PermitUserEnvironment no
+
+      # Disable tunneling and forwarding
+      AllowAgentForwarding no
+      AllowTcpForwarding no
+      PermitTunnel no
+
+      # Disable root login
+      PermitRootLogin no
+
+      # Ciphers recommended by Mozilla
+      # https://infosec.mozilla.org/guidelines/openssh
+      # Supported HostKey algorithms by order of preference.
+      HostKey /etc/ssh/ssh_host_ed25519_key
+      HostKey /etc/ssh/ssh_host_rsa_key
+      HostKey /etc/ssh/ssh_host_ecdsa_key
+
+      # Specifies the available KEX (Key Exchange) algorithms.
+      KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256
+
+      # Specifies the ciphers allowed
+      Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+
+      # Specifies the available MAC (message authentication code) algorithms
+      MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256,umac-128@openssh.com
+
+      # Password based logins are disabled - only public key based logins are allowed
+      AuthenticationMethods publickey
+
+      # Needed auditing key usage
+      LogLevel VERBOSE
+
+      # Log sftp level file access
+      Subsystem sftp  /usr/lib/ssh/sftp-server -f AUTHPRIV -l INFO
+
+final_message: Server initialization complete.

@@ -1,0 +1,46 @@
+#cloud-config
+
+users:
+  - name: agonza
+    lock_passwd: True
+    gecos: Alberto Gonzalez
+    groups: [sudo]
+    ssh_import_id: [gh:agonza05]
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    shell: /bin/bash
+
+package_update: true
+
+groups:
+  - docker: [agonza]
+
+packages:
+  - ca-certificates
+  - curl
+
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable docker
+  - systemctl start docker
+
+  # disable swap
+  - sysctl -w vm.swappiness=0
+  - echo "vm.swappiness = 0" | tee -a /etc/sysctl.conf
+  - swapoff -a
+
+  # disable unnecessary services
+  - systemctl disable man-db.timer man-db.service --now
+  - systemctl disable apport.service apport-autoreport.service  --now
+  - systemctl disable apt-daily.service apt-daily.timer --now
+  - systemctl disable apt-daily-upgrade.service apt-daily-upgrade.timer --now
+  - systemctl disable unattended-upgrades.service --now
+  - systemctl disable motd-news.service motd-news.timer --now
+  - systemctl disable bluetooth.target --now
+  - systemctl disable ua-messaging.service ua-messaging.timer --now
+  - systemctl disable ua-timer.timer ua-timer.service --now
+  - systemctl disable systemd-tmpfiles-clean.timer --now
